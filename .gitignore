@@ -1,0 +1,25 @@
+# ---- Basura del sistema operativo ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# ---- Archivos temporales de editores ----
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# ---- Sesiones de trabajo (.json) ----
+# Por defecto se IGNORAN los .json para no publicar tu avance en un repo público.
+# El repo solo necesita index.html y README.md para funcionar.
+*.json
+
+# Si en algún momento SÍ quieren versionar respaldos de sesión dentro del repo,
+# creen una carpeta llamada  backups/  y descomenten la línea de abajo:
+# !backups/*.json
