@@ -77,6 +77,9 @@ let canonical={},canonName={},clusterDone={},studyReviews={},removedLog=[];
 let revOut={};
 // memoria: notas + auto-guardado
 let notes='',studyNotes={};
+// notas contextuales: por revisión (revNotes[rid]) y por estudio×revisión (revStudyNotes[rid][sid])
+let revNotes={},revStudyNotes={};
+function setRevStudyNote(rid,sid,val){revStudyNotes[rid]=revStudyNotes[rid]||{};revStudyNotes[rid][sid]=val;autosave();}
 const LSKEY='citation_dedup_autosave_v1';let lsOK=true;
 // artículos agregados por el usuario + selección para fusión manual
 let addedStudies=[];let manualSel=new Set();
@@ -155,11 +158,12 @@ function renderRev(){let h='<div class="bar"><select id="rsel" onchange="renderR
  if(sel){const list=studies.filter(s=>rOf(s.sid).includes(sel));const uniq=new Set(list.map(s=>canOf(s.sid)));
   const nOut={VO2:0,FC:0,QoL:0};[...uniq].forEach(cn=>OUT.forEach(o=>{if(rcTagged(sel,cn,o.c))nOut[o.c]++;}));
   h+='<div class="card"><b>'+sel+' · '+esc(revName[sel])+'</b><div class="hint">'+list.length+' entradas · '+uniq.size+' estudios únicos. Etiquetados: <b>'+nOut.VO2+'</b> VO2 · <b>'+nOut.FC+'</b> FC · <b>'+nOut.QoL+'</b> QoL.<br>Marca en qué outcome(s) reportó esta SR cada RCT. Pulsa "✕" si un estudio NO fue realmente incluido por esta SR (verifícalo en su lista de referencias).</div>';
-  h+='<table><thead><tr><th>SID</th><th>Estudio</th><th>Estado</th><th>Outcomes en esta SR</th><th></th></tr></thead><tbody>';
+  h+='<div style="margin:6px 0 12px"><b>📝 Nota de esta revisión</b><textarea id="revNote" style="width:100%;min-height:64px;padding:9px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:14px" oninput="revNotes[\''+sel+'\']=this.value;autosave()" placeholder="Nota general de '+esc(revName[sel])+' (RoB usado, estudios que faltan, observaciones de la SR...)"></textarea></div>';
+  h+='<table><thead><tr><th>SID</th><th>Estudio</th><th>Estado</th><th>Outcomes en esta SR</th><th>Nota (en esta SR)</th><th></th></tr></thead><tbody>';
   list.forEach(s=>{const cn=canOf(s.sid);const chips=OUT.map(o=>{const on=rcTagged(sel,cn,o.c);return '<span class="oc '+o.c+(on?' on':'')+'" onclick="toggleRevOut(\''+sel+'\',\''+s.sid+'\',\''+o.c+'\')">'+(on?'✓ ':'')+o.l+'</span>';}).join('');
-   h+='<tr><td class="sid">'+s.sid+'</td><td class="nm">'+s.name+'</td><td>'+statusBadge(s.sid)+'</td><td>'+chips+'</td><td><button class="xs red" onclick="removeAssoc(\''+s.sid+'\',\''+sel+'\')">✕ quitar</button></td></tr>';});
+   h+='<tr><td class="sid">'+s.sid+'</td><td class="nm">'+s.name+'</td><td>'+statusBadge(s.sid)+'</td><td>'+chips+'</td><td><textarea class="rn" data-sid="'+s.sid+'" style="width:170px;min-height:34px;padding:6px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:12px" oninput="setRevStudyNote(\''+sel+'\',\''+s.sid+'\',this.value)" placeholder="nota para este estudio en '+sel+'..."></textarea></td><td><button class="xs red" onclick="removeAssoc(\''+s.sid+'\',\''+sel+'\')">✕ quitar</button></td></tr>';});
   h+='</tbody></table></div>';}
- $('v-rev').innerHTML=h;if(sel)$('rsel').value=sel;}
+ $('v-rev').innerHTML=h;if(sel){$('rsel').value=sel;const rn=$('revNote');if(rn)rn.value=revNotes[sel]||'';const map=revStudyNotes[sel]||{};[...document.querySelectorAll('#v-rev textarea.rn')].forEach(t=>{t.value=map[t.dataset.sid]||'';});}}
 // ---- export ----
 function renderExp(){$('v-exp').innerHTML='<div class="card"><b>Exportar a Excel</b><div class="hint">Genera un libro <b>.xlsx</b> con formato y varias hojas: <b>Matriz general</b> (Study ID · Autor/Año · una columna por SR · Total), <b>Overlap</b> (CCA, CA y matriz por pares), y una hoja por outcome (<b>VO2 · Cap. funcional · Calidad de vida</b>). Refleja fusiones, outcomes por SR y asociaciones quitadas.</div><div class="tools"><button class="green" onclick="expExcel()">⬇ Exportar a Excel (.xlsx) — libro completo</button></div><div style="margin-top:12px"><b>Respaldos en CSV</b><div class="tools" style="margin-top:6px"><button onclick="expMatrix()">Matriz limpia</button><button onclick="expOutSR()">Outcomes por SR (largo)</button><button onclick="expLog()">Log fusiones</button><button onclick="expRem()">Asociaciones quitadas</button></div></div><div class="hint">El trabajo vive en esta ventana — exporta o guarda la sesión antes de cerrar.</div></div>';}
 function dl(n,t){const b=new Blob([t],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=n;a.click();}
@@ -171,8 +175,8 @@ function expRem(){let csv='SID,Study,Removed from review\n';removedLog.forEach(x
 function tab(t){curTab=t;['dup','all','out','rev','notes','ov','exp'].forEach(x=>{$('v-'+x).style.display=x===t?'block':'none';document.querySelector('.tab[data-t='+x+']').classList.toggle('active',x===t);});if(t==='all')renderAll();if(t==='out')renderOut();if(t==='rev')renderRev();if(t==='notes')renderNotes();if(t==='ov')renderOverlap();if(t==='exp')renderExp();}
 // ===== memoria: auto-guardado (localStorage) =====
 function escH(t){return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function currentState(){return {v:5,canonical:canonical,canonName:canonName,clusterDone:clusterDone,studyReviews:studyReviews,removedLog:removedLog,revOut:revOut,notes:notes,studyNotes:studyNotes,addedStudies:addedStudies};}
-function applyState(st){canonical=st.canonical||canonical;canonName=st.canonName||canonName;clusterDone=st.clusterDone||{};studyReviews=st.studyReviews||studyReviews;removedLog=st.removedLog||[];addedStudies=(st.addedStudies||[]).map(s=>({sid:s.sid,name:s.name,reviews:[...(s.reviews||[])]}));syncAdded();if(st.revOut){revOut=st.revOut;}else if(st.outTags){revOut=migrateOutTags(st.outTags,st.canonical,st.studyReviews);}else{revOut={};}notes=st.notes||'';studyNotes=st.studyNotes||{};studies.forEach(s=>{if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});}
+function currentState(){return {v:6,canonical:canonical,canonName:canonName,clusterDone:clusterDone,studyReviews:studyReviews,removedLog:removedLog,revOut:revOut,notes:notes,studyNotes:studyNotes,addedStudies:addedStudies,revNotes:revNotes,revStudyNotes:revStudyNotes};}
+function applyState(st){canonical=st.canonical||canonical;canonName=st.canonName||canonName;clusterDone=st.clusterDone||{};studyReviews=st.studyReviews||studyReviews;removedLog=st.removedLog||[];addedStudies=(st.addedStudies||[]).map(s=>({sid:s.sid,name:s.name,reviews:[...(s.reviews||[])]}));syncAdded();if(st.revOut){revOut=st.revOut;}else if(st.outTags){revOut=migrateOutTags(st.outTags,st.canonical,st.studyReviews);}else{revOut={};}notes=st.notes||'';studyNotes=st.studyNotes||{};revNotes=st.revNotes||{};revStudyNotes=st.revStudyNotes||{};studies.forEach(s=>{if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});}
 // ===== artículos agregados =====
 function syncAdded(){for(let i=studies.length-1;i>=0;i--){if(studies[i].sid[0]==='A'){delete byId[studies[i].sid];studies.splice(i,1);}}addedStudies.forEach(s=>{studies.push(s);byId[s.sid]=s;if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});}
 function nextAId(){let m=0;addedStudies.forEach(s=>{const n=parseInt(s.sid.slice(1))||0;if(n>m)m=n;});return 'A'+(m+1);}
@@ -206,10 +210,16 @@ function autosave(){if(!lsOK)return;try{localStorage.setItem(LSKEY,JSON.stringif
 function restoreAuto(){try{const raw=localStorage.getItem(LSKEY);if(raw){applyState(JSON.parse(raw));return true;}}catch(e){lsOK=false;}return false;}
 function clearMemory(){if(!confirm('¿Borrar la memoria automática de este navegador y empezar en blanco?\n\n(No afecta los archivos .json que hayas guardado aparte.)'))return;try{localStorage.removeItem(LSKEY);}catch(e){}location.reload();}
 // ===== Notas =====
-function renderNotes(){let h='<div class="card"><b>Bitácora general</b><div class="hint">Notas libres del proyecto (decisiones, pendientes, recordatorios). Se guarda con la sesión y en la memoria automática.</div><textarea id="bitacora" style="width:100%;min-height:130px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:14px" oninput="notes=this.value;autosave()" placeholder="Ej: Currie 2013 = MSSE (Dubberley), N=11 vs 11 · revisar Currie 2014 vs 2015 · Du separa 2013A/2013B..."></textarea></div>';
- h+='<div class="card"><b>Notas por estudio</b><div class="hint">Busca un estudio y escríbele una nota (la huella de identificación, por qué lo quitaste, etc.). Se asocia al estudio canónico.</div><input type="text" id="noteq" placeholder="Buscar estudio para anotar..." oninput="filterNotes()"><div id="noteResults" style="margin-top:10px"><span class="mut">Escribe para buscar…</span></div></div>';
- h+='<div class="card"><b>Estudios con nota</b><div class="hint">Se actualiza al reabrir esta pestaña.</div><div id="noteList" style="margin-top:8px"></div></div>';
- $('v-notes').innerHTML=h;$('bitacora').value=notes;renderNoteList();}
+function renderNotes(){let h='<div class="card"><b>Bitácora general</b><div class="hint">Notas libres del proyecto completo (decisiones, pendientes, recordatorios). Se guarda con la sesión y en la memoria automática.</div><textarea id="bitacora" style="width:100%;min-height:130px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:14px" oninput="notes=this.value;autosave()" placeholder="Ej: Currie 2013 = MSSE (Dubberley), N=11 vs 11 · revisar Currie 2014 vs 2015 · Du separa 2013A/2013B..."></textarea></div>';
+ h+='<div class="card"><b>Resumen de notas por revisión</b><div class="hint">Las notas se <b>escriben en la pestaña "Por revisión"</b> (una nota para la SR y una nota por estudio dentro de esa SR). Aquí las ves todas juntas.</div>';
+ let any=false;reviews.forEach(r=>{const rid=r.rid;const rn=(revNotes[rid]||'').trim();const sm=revStudyNotes[rid]||{};const ks=Object.keys(sm).filter(k=>sm[k]&&sm[k].trim());if(!rn&&!ks.length)return;any=true;
+   h+='<div style="margin:10px 0;padding:8px 10px;border-left:3px solid var(--accent);background:#fafbfc;border-radius:0 8px 8px 0"><b>'+rid+' · '+escH(revName[rid])+'</b>';
+   if(rn)h+='<div style="margin:4px 0;white-space:pre-wrap;color:#374151">'+escH(rn)+'</div>';
+   ks.forEach(sid=>{h+='<div class="row"><span class="nm">'+escH(byId[sid]?byId[sid].name:sid)+'</span><span class="revs">'+escH(sm[sid])+'</span></div>';});h+='</div>';});
+ if(!any)h+='<span class="mut">— aún no hay notas por revisión. Ve a "Por revisión", elige una SR y escribe. —</span>';h+='</div>';
+ const lg=Object.keys(studyNotes).filter(k=>studyNotes[k]&&studyNotes[k].trim());
+ if(lg.length){h+='<div class="card"><b>Notas por estudio (globales — versión anterior)</b><div class="hint">Vienen de una versión previa; ahora las notas son por estudio×revisión. Se conservan aquí para que no se pierdan.</div>';lg.forEach(cn=>{h+='<div class="row"><span class="nm">'+escH(canonName[cn]||cn)+'</span><span class="revs">'+escH(studyNotes[cn])+'</span></div>';});h+='</div>';}
+ $('v-notes').innerHTML=h;$('bitacora').value=notes;}
 function filterNotes(){const q=($('noteq')?$('noteq').value:'').toLowerCase();const box=$('noteResults');if(!box)return;if(!q){box.innerHTML='<span class="mut">Escribe para buscar…</span>';return;}
  const g=uniqueGroups();const heads=Object.keys(g).filter(cn=>(canonName[cn]||'').toLowerCase().includes(q)||g[cn].some(s=>s.toLowerCase().includes(q)||byId[s].name.toLowerCase().includes(q)));
  let h='';heads.slice(0,30).forEach(cn=>{h+='<div class="row" style="flex-direction:column;align-items:stretch"><div><span class="nm">'+canonName[cn]+'</span> <span class="mut">'+cn+'</span></div><textarea data-sid="'+cn+'" style="width:100%;min-height:46px;margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:8px;font-family:inherit" oninput="studyNotes[this.dataset.sid]=this.value;autosave()" placeholder="Nota para '+esc(canonName[cn])+'..."></textarea></div>';});
@@ -285,6 +295,7 @@ function mergeSession(file){if(!file)return;const rd=new FileReader();rd.onload=
    const rk=o=>{if(!o)return o;const n={};Object.keys(o).forEach(k=>{n[remap[k]||k]=o[k];});return n;};
    if(st.canonical){const n={};Object.keys(st.canonical).forEach(k=>{n[remap[k]||k]=remap[st.canonical[k]]||st.canonical[k];});st.canonical=n;}
    st.canonName=rk(st.canonName);st.studyReviews=rk(st.studyReviews);st.studyNotes=rk(st.studyNotes);
+   if(st.revStudyNotes){const n={};Object.keys(st.revStudyNotes).forEach(rid=>{n[rid]=rk(st.revStudyNotes[rid]);});st.revStudyNotes=n;}
    if(st.revOut){const n={};Object.keys(st.revOut).forEach(rid=>{n[rid]=rk(st.revOut[rid]);});st.revOut=n;}
    if(st.removedLog)st.removedLog.forEach(x=>{if(remap[x.sid])x.sid=remap[x.sid];});
    syncAdded();}
@@ -314,6 +325,8 @@ function mergeSession(file){if(!file)return;const rd=new FileReader();rd.onload=
   // notas: bitácora (concatena si difiere) + notas por estudio (unión)
   if(st.notes){if(!notes)notes=st.notes;else if(notes.indexOf(st.notes)===-1)notes=notes+'\n\n--- (combinado) ---\n'+st.notes;}
   if(st.studyNotes){Object.keys(st.studyNotes).forEach(cn=>{const inc=st.studyNotes[cn];if(!inc||!inc.trim())return;const tgt=canonical[cn]||cn;if(!studyNotes[tgt])studyNotes[tgt]=inc;else if(studyNotes[tgt].indexOf(inc)===-1)studyNotes[tgt]=studyNotes[tgt]+' | '+inc;});}
+  if(st.revNotes){Object.keys(st.revNotes).forEach(rid=>{const inc=(st.revNotes[rid]||'').trim();if(!inc)return;if(!revNotes[rid])revNotes[rid]=inc;else if(revNotes[rid].indexOf(inc)===-1)revNotes[rid]=revNotes[rid]+' | '+inc;});}
+  if(st.revStudyNotes){Object.keys(st.revStudyNotes).forEach(rid=>{revStudyNotes[rid]=revStudyNotes[rid]||{};Object.keys(st.revStudyNotes[rid]).forEach(sid=>{const inc=(st.revStudyNotes[rid][sid]||'').trim();if(!inc)return;if(!revStudyNotes[rid][sid])revStudyNotes[rid][sid]=inc;else if(revStudyNotes[rid][sid].indexOf(inc)===-1)revStudyNotes[rid][sid]=revStudyNotes[rid][sid]+' | '+inc;});});}
   studies.forEach(s=>{if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});
   renderDup();stats();tab(curTab);
   alert('Sesiones combinadas ✓\n\n+'+addTags+' etiquetas de outcome\n+'+addMerge+' estudios fusionados (nuevos)\n+'+addNew+' artículos agregados nuevos\n+'+addRem+' asociaciones quitadas\n\nLas fusiones de ambas se unieron automáticamente (union-find); si las dos usaron un canónico distinto para el mismo estudio, se conservó un solo grupo.');
