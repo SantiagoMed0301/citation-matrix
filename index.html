@@ -118,7 +118,7 @@ function renderDup(){let h='<div class="card" style="border-color:#c7d2fe;backgr
   const defName=mem.map(m=>byId[m].name).sort((a,b)=>a.length-b.length)[0];
   h+='<div class="tools" style="margin-top:10px"><input class="namein" id="nm'+ci+'" value="'+esc(defName)+'"><button class="green" onclick="doMerge('+ci+')">Fusionar</button><button onclick="dismiss('+ci+')">No son duplicados</button><button onclick="resetCluster('+ci+')">Deshacer</button></div></div>';});
  $('v-dup').innerHTML=h;renderManual();}
-function doMerge(ci){const cks=[...document.querySelectorAll('.ck'+ci+':checked')].map(x=>x.value);if(cks.length<2){alert('Selecciona al menos 2.');return;}const name=$('nm'+ci).value.trim()||byId[cks[0]].name;const canon=cks[0];
+function doMerge(ci){const cks=[...document.querySelectorAll('.ck'+ci+':checked')].map(x=>x.value);if(cks.length<2){alert('Selecciona al menos 2.');return;}const name=$('nm'+ci).value.trim()||byId[cks[0]].name;const canon=cks.find(sid=>byId[sid].name.trim().toLowerCase()===name.toLowerCase())||cks[0];
  // reassign per-SR outcome tags from old canonicals to the new canonical
  reviews.forEach(r=>{const rid=r.rid;if(!revOut[rid])return;cks.forEach(sid=>{if(revOut[rid][sid]){revOut[rid][canon]=revOut[rid][canon]||{};['VO2','FC','QoL'].forEach(k=>{if(revOut[rid][sid][k])revOut[rid][canon][k]=true;});if(sid!==canon)delete revOut[rid][sid];}});});
  cks.forEach(sid=>canonical[sid]=canon);canonName[canon]=name;clusterDone[ci]=true;renderDup();stats();}
@@ -200,7 +200,7 @@ function renderManual(){const q=($('mq')?$('mq').value:'').toLowerCase();const b
  rows.slice(0,40).forEach(s=>{const on=manualSel.has(s.sid);h+='<div class="row"><label class="cb"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleManual(\''+s.sid+'\')"></label><span class="sid">'+s.sid+'</span><span class="nm">'+s.name+'</span> '+statusBadge(s.sid)+'</div>';});
  box.innerHTML=h;}
 function doManualMerge(){const sel=[...manualSel];if(sel.length<2){alert('Marca al menos 2 variantes del mismo estudio.');return;}
- const name=($('mname')?$('mname').value:'').trim();const head=sel[0];
+ const name=($('mname')?$('mname').value:'').trim();const head=(name&&sel.find(sid=>byId[sid].name.trim().toLowerCase()===name.toLowerCase()))||sel[0];
  const members=new Set();sel.forEach(sid=>{const c=canonical[sid];studies.forEach(s=>{if(canonical[s.sid]===c)members.add(s.sid);});});
  reviews.forEach(r=>{const rid=r.rid;if(!revOut[rid])return;members.forEach(sid=>{const oc=canonical[sid];if(oc!==head&&revOut[rid][oc]){revOut[rid][head]=revOut[rid][head]||{};['VO2','FC','QoL'].forEach(k=>{if(revOut[rid][oc][k])revOut[rid][head][k]=true;});delete revOut[rid][oc];}});});
  members.forEach(sid=>{const oc=canonical[sid];if(oc!==head&&studyNotes[oc]){studyNotes[head]=studyNotes[head]?studyNotes[head]+' | '+studyNotes[oc]:studyNotes[oc];delete studyNotes[oc];}});
