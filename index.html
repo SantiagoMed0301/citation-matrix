@@ -49,6 +49,7 @@ th{position:sticky;top:120px;background:var(--card)}tr:hover td{background:#fafb
 <div class="stat"><b id="s-vo2">0</b><span>únicos VO2</span></div>
 <div class="stat"><b id="s-fc">0</b><span>únicos FC</span></div>
 <div class="stat"><b id="s-qol">0</b><span>únicos QoL</span></div>
+<div class="stat"><b id="s-simdup" style="color:#d97706">0</b><span>posibles dup</span></div>
 </div>
 <div class="tabs">
 <div class="tab active" data-t="dup" onclick="tab('dup')">Duplicados</div>
@@ -83,6 +84,13 @@ function setRevStudyNote(rid,sid,val){revStudyNotes[rid]=revStudyNotes[rid]||{};
 const LSKEY='citation_dedup_autosave_v1';let lsOK=true;
 // artículos agregados por el usuario + selección para fusión manual
 let addedStudies=[];let manualSel=new Set();
+// renombres persistentes de estudios (base o agregados)
+let nameOverrides={};
+// marca de "posible duplicado sin fusionar" (fuzzy) + descartados por el usuario
+let simFlagSet=new Set(),simPartners={},simDismissed=[];const SIM_BADGE_TH=0.80;
+function pairKey(a,b){return [a,b].sort().join('|');}
+function recomputeSimFlags(){simFlagSet=new Set();simPartners={};const dis=new Set(simDismissed);similarPairs(SIM_BADGE_TH).forEach(p=>{if(dis.has(pairKey(p.a,p.b)))return;simFlagSet.add(p.a);simFlagSet.add(p.b);(simPartners[p.a]=simPartners[p.a]||[]).push(canonName[p.b]);(simPartners[p.b]=simPartners[p.b]||[]).push(canonName[p.a]);});}
+function dismissSimilar(a,b){simDismissed.push(pairKey(a,b));recomputeSimFlags();if($('similarResults'))showSimilars();stats();}
 studies.forEach(s=>{canonical[s.sid]=s.sid;canonName[s.sid]=s.name;studyReviews[s.sid]=[...s.reviews];});
 const $=id=>document.getElementById(id);const canOf=s=>canonical[s];const rOf=s=>studyReviews[s];
 function uniqueGroups(){const g={};studies.forEach(s=>{const c=canonical[s.sid];(g[c]=g[c]||[]).push(s.sid);});return g;}
@@ -100,18 +108,20 @@ function countOutRC(code){return Object.keys(uniqueGroups()).filter(cn=>outHasRC
 function srReports(rid,code){return revOut[rid]?Object.keys(revOut[rid]).some(cn=>revOut[rid][cn][code]):false;}
 // canonical studies this SR tagged for this outcome
 function rcsForSR(rid,code){return revOut[rid]?Object.keys(revOut[rid]).filter(cn=>revOut[rid][cn][code]):[];}
-function stats(){const g=uniqueGroups();
+function stats(){const g=uniqueGroups();recomputeSimFlags();
  $('s-entries').textContent=studies.length;$('s-unique').textContent=Object.keys(g).length;
  $('s-merged').textContent=Object.values(g).filter(a=>a.length>1).length;$('s-rem').textContent=removedLog.length;
- $('s-rev').textContent=reviews.length;$('s-vo2').textContent=countOutRC('VO2');$('s-fc').textContent=countOutRC('FC');$('s-qol').textContent=countOutRC('QoL');autosave();}
+ $('s-rev').textContent=reviews.length;$('s-vo2').textContent=countOutRC('VO2');$('s-fc').textContent=countOutRC('FC');$('s-qol').textContent=countOutRC('QoL');
+ if($('s-simdup'))$('s-simdup').textContent=simFlagSet.size;autosave();}
 function revPills(sids){return unionReviews(sids).sort((a,b)=>(+a.slice(1))-(+b.slice(1))).map(r=>'<span class="pill plain" title="'+esc(revName[r])+'">'+r+'</span>').join('');}
-function statusBadge(sid){const c=canOf(sid);const grp=Object.values(uniqueGroups()).find(g=>g.includes(sid));if(grp&&grp.length>1)return c===sid?'<span class="badge b-can">canónico</span>':'<span class="badge b-alias">alias → '+canonName[c]+'</span>';return '<span class="mut">—</span>';}
-let curTab='dup';function refresh(){stats();if(curTab==='all')filterSearch();if(curTab==='out')renderOut();if(curTab==='rev')renderRev();}
+function statusBadge(sid){const c=canOf(sid);const grp=Object.values(uniqueGroups()).find(g=>g.includes(sid));let base=(grp&&grp.length>1)?(c===sid?'<span class="badge b-can">canónico</span>':'<span class="badge b-alias">alias → '+canonName[c]+'</span>'):'<span class="mut">—</span>';if(simFlagSet.has(c))base+=' <span class="badge" style="background:#fef3c7;color:#92400e" title="Posible duplicado sin fusionar de: '+esc((simPartners[c]||[]).join(', ')||'')+'">⚠ ~dup</span>';return base;}
+let curTab='dup';function refresh(){stats();if(curTab==='all')filterSearch();if(curTab==='out')renderOut();if(curTab==='rev')renderRev();if(curTab==='notes')renderNotes();}
 // ---- removal ----
 function removeAssoc(sid,rid){studyReviews[sid]=studyReviews[sid].filter(r=>r!==rid);removedLog.push({sid:sid,name:byId[sid].name,rid:rid});refresh();}
 function restoreLast(){if(!removedLog.length)return;const x=removedLog.pop();if(!studyReviews[x.sid].includes(x.rid))studyReviews[x.sid].push(x.rid);refresh();}
 // ---- dup ----
 function renderDup(){let h='<div class="card" style="border-color:#c7d2fe;background:#eef2ff"><b>🔗 Fusión manual (entre clusters / cualquier estudio)</b><div class="hint">Para casos como <b>Villelabeitia-Jaureguizar</b>, que está repartido en varios clusters: los clusters normales solo fusionan dentro de sí mismos. Aquí busca y marca 2+ variantes del MISMO estudio <b>aunque estén en clusters distintos</b>, pon el nombre canónico y fusiónalas en un solo estudio.</div><input type="text" id="mq" placeholder="Buscar variantes por nombre (ej. villelabeitia)..." oninput="renderManual()"><div id="manualResults" style="margin:8px 0"></div><div class="tools"><input class="namein" id="mname" placeholder="Nombre canónico (bien escrito + año)" style="width:300px"><button class="green" onclick="doManualMerge()">Fusionar seleccionados</button></div></div>';
+ h+='<div class="card"><div style="display:flex;gap:16px;flex-wrap:wrap"><div style="flex:1;min-width:280px"><b>🔎 Revisar nombres similares</b><div class="hint">Detecta pares de estudios con nombre parecido aún sin fusionar (typos, variantes, o los que agregaste). Úsalo antes de finalizar para no dejar duplicados.</div><button onclick="showSimilars()">Buscar similares</button><div id="similarResults" style="margin-top:8px"></div></div><div style="flex:1;min-width:280px"><b>👻 Huérfanos (0 SR)</b><div class="hint">Estudios que quedaron sin ninguna revisión (p. ej. tras quitarlos de todas).</div><button onclick="showOrphans()">Ver huérfanos</button><div id="orphanResults" style="margin-top:8px"></div></div></div></div>';
  h+='<div class="hint">Marca las variantes que sean el MISMO estudio, escribe el nombre canónico (año verdadero) y pulsa Fusionar. Algunos con año distinto SON estudios diferentes: revisa la lista de referencias de la SR.</div>';
  clusters.forEach((mem,ci)=>{const done=clusterDone[ci];h+='<div class="card dupcard'+(done?' done':'')+'"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><b>Cluster '+(ci+1)+'</b>'+(done?'<span class="badge b-can">resuelto ✓</span>':'')+'</div>';
   mem.forEach(sid=>{const s=byId[sid];const grp=Object.values(uniqueGroups()).find(g=>g.includes(sid)&&g.length>1);h+='<div class="row"><label class="cb"><input type="checkbox" class="ck'+ci+'" value="'+sid+'" '+(grp?'':'checked')+'></label><span class="sid">'+sid+'</span><span class="nm">'+s.name+'</span><span class="revs">'+rOf(sid).length+' SR: '+revPills([sid])+'</span> '+statusBadge(sid)+'</div>';});
@@ -128,8 +138,8 @@ function resetCluster(ci){clusters[ci].forEach(sid=>{canonical[sid]=sid;canonNam
 function renderAll(){let h='<div class="bar"><input type="text" id="q" placeholder="Busca el nombre TAL CUAL sale en el forest plot..." oninput="filterSearch()"><span class="mut" id="qcount"></span></div><div class="hint">Escribe el nombre como lo puso el autor; te muestra a qué canónico pertenece y en qué outcomes está etiquetado (por cualquier SR). El etiquetado de outcomes se hace en la pestaña <b>Por revisión</b>.</div><div id="searchResults"></div>';$('v-all').innerHTML=h;filterSearch();}
 function filterSearch(){const q=($('q')?$('q').value:'').toLowerCase();const rows=studies.filter(s=>s.name.toLowerCase().includes(q)||s.sid.toLowerCase().includes(q));
  if($('qcount'))$('qcount').textContent=rows.length+' de '+studies.length;
- let h='<table><thead><tr><th>SID</th><th>Estudio</th><th>#SR</th><th>Estado</th><th>Outcomes (por cualquier SR)</th></tr></thead><tbody>';
- rows.forEach(s=>{const cn=canOf(s.sid);const mini=OUT.filter(o=>outHasRC(cn,o.c)).map(o=>'<span class="ocmini '+o.c+'">'+o.c+'</span>').join(' ')||'<span class="mut">—</span>';h+='<tr><td class="sid">'+s.sid+'</td><td class="nm">'+s.name+'</td><td>'+rOf(s.sid).length+'</td><td>'+statusBadge(s.sid)+'</td><td>'+mini+'</td></tr>';});
+ let h='<table><thead><tr><th>SID</th><th>Estudio</th><th>#SR</th><th>Estado</th><th>Outcomes (por cualquier SR)</th><th></th></tr></thead><tbody>';
+ rows.forEach(s=>{const cn=canOf(s.sid);const mini=OUT.filter(o=>outHasRC(cn,o.c)).map(o=>'<span class="ocmini '+o.c+'">'+o.c+'</span>').join(' ')||'<span class="mut">—</span>';h+='<tr><td class="sid">'+s.sid+'</td><td class="nm">'+s.name+'</td><td>'+rOf(s.sid).length+'</td><td>'+statusBadge(s.sid)+'</td><td>'+mini+'</td><td><button class="xs" title="Renombrar" onclick="renameStudy(\''+s.sid+'\')">✎</button></td></tr>';});
  h+='</tbody></table>';$('searchResults').innerHTML=h;}
 // ---- out : two views ----
 let outView='rc';
@@ -155,6 +165,7 @@ function renderRev(){let h='<div class="bar"><select id="rsel" onchange="renderR
  h+='<div class="card" style="border-color:#bbf7d0;background:#f0fdf4"><b>➕ Agregar artículo</b><div class="hint">Si a una SR le falta un estudio (ej. notaste que a R2 le falta uno), agrégalo aquí. Se crea como estudio nuevo incluido por la(s) revisión(es) que indiques. Si es el mismo que otro ya existente, luego únelos en Duplicados → Fusión manual.</div><div class="tools"><input class="namein" id="addName" placeholder="Autor Año (ej. Smith 2020)" style="width:240px"><input class="namein" id="addRevs" value="'+(sel||'')+'" placeholder="R2 (o R2,R5)" style="width:130px" title="Revisiones separadas por coma"><button class="green" onclick="addStudy()">Agregar</button></div>';
  if(addedStudies.length){h+='<div class="hint" style="margin-top:8px">Agregados por ti: '+addedStudies.map(s=>esc(s.name)+' ('+s.sid+', '+s.reviews.join('/')+') <button class="xs red" onclick="delStudy(\''+s.sid+'\')">✕</button>').join(' · ')+'</div>';}
  h+='</div>';
+ if(sel){h+='<div class="card" style="border-color:#c7d2fe;background:#eef2ff"><b>🔗 Añadir un estudio EXISTENTE a '+sel+'</b><div class="hint">Si el estudio YA está en tu matriz (en otras SR) y solo le falta esta, búscalo y añádelo — sin crear duplicados ni tener que fusionar.</div><input type="text" id="addExq" placeholder="Buscar estudio existente..." oninput="filterAddEx()"><div id="addExResults" style="margin-top:8px"><span class="mut">Escribe para buscar un estudio que YA exista en la matriz…</span></div></div>';}
  if(sel){const list=studies.filter(s=>rOf(s.sid).includes(sel));const uniq=new Set(list.map(s=>canOf(s.sid)));
   const nOut={VO2:0,FC:0,QoL:0};[...uniq].forEach(cn=>OUT.forEach(o=>{if(rcTagged(sel,cn,o.c))nOut[o.c]++;}));
   h+='<div class="card"><b>'+sel+' · '+esc(revName[sel])+'</b><div class="hint">'+list.length+' entradas · '+uniq.size+' estudios únicos. Etiquetados: <b>'+nOut.VO2+'</b> VO2 · <b>'+nOut.FC+'</b> FC · <b>'+nOut.QoL+'</b> QoL.<br>Marca en qué outcome(s) reportó esta SR cada RCT. Pulsa "✕" si un estudio NO fue realmente incluido por esta SR (verifícalo en su lista de referencias).</div>';
@@ -175,16 +186,17 @@ function expRem(){let csv='SID,Study,Removed from review\n';removedLog.forEach(x
 function tab(t){curTab=t;['dup','all','out','rev','notes','ov','exp'].forEach(x=>{$('v-'+x).style.display=x===t?'block':'none';document.querySelector('.tab[data-t='+x+']').classList.toggle('active',x===t);});if(t==='all')renderAll();if(t==='out')renderOut();if(t==='rev')renderRev();if(t==='notes')renderNotes();if(t==='ov')renderOverlap();if(t==='exp')renderExp();}
 // ===== memoria: auto-guardado (localStorage) =====
 function escH(t){return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function currentState(){return {v:6,canonical:canonical,canonName:canonName,clusterDone:clusterDone,studyReviews:studyReviews,removedLog:removedLog,revOut:revOut,notes:notes,studyNotes:studyNotes,addedStudies:addedStudies,revNotes:revNotes,revStudyNotes:revStudyNotes};}
-function applyState(st){canonical=st.canonical||canonical;canonName=st.canonName||canonName;clusterDone=st.clusterDone||{};studyReviews=st.studyReviews||studyReviews;removedLog=st.removedLog||[];addedStudies=(st.addedStudies||[]).map(s=>({sid:s.sid,name:s.name,reviews:[...(s.reviews||[])]}));syncAdded();if(st.revOut){revOut=st.revOut;}else if(st.outTags){revOut=migrateOutTags(st.outTags,st.canonical,st.studyReviews);}else{revOut={};}notes=st.notes||'';studyNotes=st.studyNotes||{};revNotes=st.revNotes||{};revStudyNotes=st.revStudyNotes||{};studies.forEach(s=>{if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});}
+function currentState(){return {v:6,canonical:canonical,canonName:canonName,clusterDone:clusterDone,studyReviews:studyReviews,removedLog:removedLog,revOut:revOut,notes:notes,studyNotes:studyNotes,addedStudies:addedStudies,revNotes:revNotes,revStudyNotes:revStudyNotes,nameOverrides:nameOverrides,simDismissed:simDismissed};}
+function applyState(st){canonical=st.canonical||canonical;canonName=st.canonName||canonName;clusterDone=st.clusterDone||{};studyReviews=st.studyReviews||studyReviews;removedLog=st.removedLog||[];nameOverrides=st.nameOverrides||{};addedStudies=(st.addedStudies||[]).map(s=>({sid:s.sid,name:s.name,reviews:[...(s.reviews||[])]}));syncAdded();if(st.revOut){revOut=st.revOut;}else if(st.outTags){revOut=migrateOutTags(st.outTags,st.canonical,st.studyReviews);}else{revOut={};}notes=st.notes||'';studyNotes=st.studyNotes||{};revNotes=st.revNotes||{};revStudyNotes=st.revStudyNotes||{};simDismissed=st.simDismissed||[];studies.forEach(s=>{if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});}
 // ===== artículos agregados =====
-function syncAdded(){for(let i=studies.length-1;i>=0;i--){if(studies[i].sid[0]==='A'){delete byId[studies[i].sid];studies.splice(i,1);}}addedStudies.forEach(s=>{studies.push(s);byId[s.sid]=s;if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});}
+function syncAdded(){for(let i=studies.length-1;i>=0;i--){if(studies[i].sid[0]==='A'){delete byId[studies[i].sid];studies.splice(i,1);}}addedStudies.forEach(s=>{studies.push(s);byId[s.sid]=s;if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});Object.keys(nameOverrides).forEach(sid=>{if(byId[sid])byId[sid].name=nameOverrides[sid];});}
 function nextAId(){let m=0;addedStudies.forEach(s=>{const n=parseInt(s.sid.slice(1))||0;if(n>m)m=n;});return 'A'+(m+1);}
 function addStudy(){const nm=($('addName')?$('addName').value:'').trim();const rv=($('addRevs')?$('addRevs').value:'').trim();
  if(!nm){alert('Escribe el autor y año del artículo (ej. Smith 2020).');return;}
  const valid=new Set(reviews.map(r=>r.rid));const revs=rv.split(',').map(x=>x.trim().toUpperCase()).filter(x=>x);
  if(!revs.length){alert('Indica al menos una revisión (ej. R2).');return;}
  const bad=revs.filter(x=>!valid.has(x));if(bad.length){alert('Revisión(es) no válida(s): '+bad.join(', ')+'. Usa R1..R33.');return;}
+ const sims=similarTo(nm,null);if(sims.length){if(!confirm('⚠️ Ya existe algo parecido:\n'+sims.map(x=>'• '+x.name+' ('+Math.round(x.r*100)+'%)').join('\n')+'\n\n¿De todos modos crear "'+nm+'" como NUEVO?\n(Si es el mismo, cancela y usa "Añadir estudio existente".)'))return;}
  const sid=nextAId();const s={sid:sid,name:nm,reviews:[...revs]};addedStudies.push(s);syncAdded();canonical[sid]=sid;canonName[sid]=nm;studyReviews[sid]=[...revs];
  renderRev();stats();alert('✔ Agregado: '+nm+' ('+sid+') en '+revs.join(', ')+'.\nSi es el mismo que otro estudio ya existente, ve a Duplicados → Fusión manual para unirlos.');}
 function delStudy(sid){if(!confirm('¿Eliminar el artículo agregado "'+(byId[sid]?byId[sid].name:sid)+'"?'))return;
@@ -209,14 +221,44 @@ function doManualMerge(){const sel=[...manualSel];if(sel.length<2){alert('Marca 
 function autosave(){if(!lsOK)return;try{localStorage.setItem(LSKEY,JSON.stringify(currentState()));const el=$('autosaveInd');if(el)el.textContent='✓ Guardado automático '+new Date().toLocaleTimeString();}catch(e){lsOK=false;const el=$('autosaveInd');if(el)el.textContent='(memoria automática no disponible aquí — usa 💾 Guardar sesión)';}}
 function restoreAuto(){try{const raw=localStorage.getItem(LSKEY);if(raw){applyState(JSON.parse(raw));return true;}}catch(e){lsOK=false;}return false;}
 function clearMemory(){if(!confirm('¿Borrar la memoria automática de este navegador y empezar en blanco?\n\n(No afecta los archivos .json que hayas guardado aparte.)'))return;try{localStorage.removeItem(LSKEY);}catch(e){}location.reload();}
+// ===== detección de nombres similares (fuzzy) =====
+function normName(s){return (s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]/g,'');}
+function leven(a,b){const m=a.length,n=b.length;if(!m)return n;if(!n)return m;let prev=Array.from({length:n+1},(_,j)=>j),cur=new Array(n+1);for(let i=1;i<=m;i++){cur[0]=i;for(let j=1;j<=n;j++){cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));}[prev,cur]=[cur,prev];}return prev[n];}
+function simRatio(a,b){a=normName(a);b=normName(b);if(!a||!b)return 0;const L=Math.max(a.length,b.length);return 1-leven(a,b)/L;}
+function similarPairs(th){const g=uniqueGroups();const heads=Object.keys(g).filter(cn=>unionReviews(g[cn]).length>0||g[cn].length>1);const out=[];for(let i=0;i<heads.length;i++)for(let j=i+1;j<heads.length;j++){const r=simRatio(canonName[heads[i]],canonName[heads[j]]);if(r>=th)out.push({a:heads[i],b:heads[j],r:r});}return out.sort((x,y)=>y.r-x.r);}
+function similarTo(name,exclude){const g=uniqueGroups();return Object.keys(g).filter(cn=>cn!==exclude).map(cn=>({sid:cn,name:canonName[cn],r:simRatio(name,canonName[cn])})).filter(x=>x.r>=0.82).sort((a,b)=>b.r-a.r).slice(0,5);}
+function showSimilars(){const box=$('similarResults');if(!box)return;const th=0.74;const dis=new Set(simDismissed);const pairs=similarPairs(th).filter(p=>!dis.has(pairKey(p.a,p.b))).slice(0,80);let h='<div class="hint">'+pairs.length+' par(es) con nombre ≥'+Math.round(th*100)+'% parecido, aún NO fusionados. Revisa si alguno es el mismo estudio. La marca <b>⚠ ~dup</b> aparece en los ≥'+Math.round(SIM_BADGE_TH*100)+'%.</div>';
+ pairs.forEach(p=>{h+='<div class="row"><span class="nm">'+escH(canonName[p.a])+'</span> <span class="mut">'+p.a+'</span> ↔ <span class="nm">'+escH(canonName[p.b])+'</span> <span class="mut">'+p.b+'</span> <span class="badge b-alias">'+Math.round(p.r*100)+'%</span> <button class="xs" onclick="prepManualMerge(\''+p.a+'\',\''+p.b+'\')">fusionar…</button> <button class="xs" onclick="dismissSimilar(\''+p.a+'\',\''+p.b+'\')">no es dup</button></div>';});
+ if(!pairs.length)h+='<span class="mut">✓ No hay nombres muy parecidos sin fusionar (o ya los descartaste).</span>';box.innerHTML=h;}
+function prepManualMerge(a,b){manualSel=new Set([a,b]);if($('mname'))$('mname').value=canonName[a].length<=canonName[b].length?canonName[a]:canonName[b];renderManual();document.querySelector('.tab[data-t=dup]')&&window.scrollTo(0,0);alert('Marcados en Fusión manual: '+canonName[a]+' + '+canonName[b]+'. Revisa el nombre canónico y pulsa "Fusionar seleccionados".');}
+// ===== huérfanos (0 SR) =====
+function orphanList(){return studies.filter(s=>rOf(s.sid).length===0).map(s=>s.sid);}
+function showOrphans(){const box=$('orphanResults');if(!box)return;const orf=orphanList();let h='<div class="hint">'+orf.length+' estudio(s) sin ninguna SR (p. ej. quitados de todas). No cuentan en overlap ni en el Excel, pero siguen en el conteo "únicos".</div>';
+ orf.forEach(sid=>{const added=sid[0]==='A';h+='<div class="row"><span class="sid">'+sid+'</span><span class="nm">'+escH(byId[sid].name)+'</span> '+(added?'<button class="xs red" onclick="delStudy(\''+sid+'\')">✕ borrar</button>':'<span class="mut">(base — no borrable; renómbralo o reasígnalo en Por revisión)</span>')+'</div>';});
+ if(!orf.length)h+='<span class="mut">✓ No hay huérfanos.</span>';box.innerHTML=h;}
+// ===== renombrar estudio =====
+function renameStudy(sid){const head=canOf(sid);const cur=byId[sid].name;const nn=prompt('Nuevo nombre para "'+cur+'":',cur);if(nn===null)return;const v=nn.trim();if(!v||v===cur)return;
+ byId[sid].name=v;nameOverrides[sid]=v;const ad=addedStudies.find(s=>s.sid===sid);if(ad)ad.name=v;
+ if(head===sid)canonName[sid]=v;
+ refresh();if(curTab==='dup')renderDup();if(curTab==='all')filterSearch();stats();}
+// ===== añadir un estudio EXISTENTE a una revisión =====
+function addExistingToRev(sid,rid){if(!rid){alert('Elige primero una revisión arriba.');return;}if(rOf(sid).includes(rid)){alert('Ese estudio ya está en '+rid+'.');return;}
+ studyReviews[sid].push(rid);removedLog=removedLog.filter(x=>!(x.sid===sid&&x.rid===rid));
+ const ad=addedStudies.find(s=>s.sid===sid);if(ad&&!ad.reviews.includes(rid))ad.reviews.push(rid);
+ renderRev();stats();}
+function filterAddEx(){const rid=($('rsel')?$('rsel').value:'');const q=($('addExq')?$('addExq').value:'').toLowerCase();const box=$('addExResults');if(!box)return;if(!q){box.innerHTML='<span class="mut">Escribe para buscar un estudio que YA exista en la matriz…</span>';return;}
+ const g=uniqueGroups();const heads=Object.keys(g).filter(cn=>canonName[cn].toLowerCase().includes(q)||g[cn].some(s=>byId[s].name.toLowerCase().includes(q)));
+ let h='';heads.slice(0,25).forEach(cn=>{const here=unionReviews(g[cn]).includes(rid);h+='<div class="row"><span class="nm">'+escH(canonName[cn])+'</span> <span class="mut">'+cn+' · '+unionReviews(g[cn]).length+' SR</span> '+(here?'<span class="badge b-can">ya en '+rid+'</span>':'<button class="xs green" onclick="addExistingToRev(\''+cn+'\',\''+rid+'\')">+ añadir a '+rid+'</button>')+'</div>';});
+ if(!heads.length)h='<span class="mut">Sin coincidencias.</span>';box.innerHTML=h;}
 // ===== Notas =====
 function renderNotes(){let h='<div class="card"><b>Bitácora general</b><div class="hint">Notas libres del proyecto completo (decisiones, pendientes, recordatorios). Se guarda con la sesión y en la memoria automática.</div><textarea id="bitacora" style="width:100%;min-height:130px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:inherit;font-size:14px" oninput="notes=this.value;autosave()" placeholder="Ej: Currie 2013 = MSSE (Dubberley), N=11 vs 11 · revisar Currie 2014 vs 2015 · Du separa 2013A/2013B..."></textarea></div>';
- h+='<div class="card"><b>Resumen de notas por revisión</b><div class="hint">Las notas se <b>escriben en la pestaña "Por revisión"</b> (una nota para la SR y una nota por estudio dentro de esa SR). Aquí las ves todas juntas.</div>';
+ h+='<div class="card"><b>Estudios con nota (accionable)</b><div class="hint">Cada estudio con nota, en su SR. Marca/desmarca su outcome (VO2/CF/QoL) o quítalo de la SR aquí mismo. Las notas se escriben en "Por revisión".</div>';
  let any=false;reviews.forEach(r=>{const rid=r.rid;const rn=(revNotes[rid]||'').trim();const sm=revStudyNotes[rid]||{};const ks=Object.keys(sm).filter(k=>sm[k]&&sm[k].trim());if(!rn&&!ks.length)return;any=true;
    h+='<div style="margin:10px 0;padding:8px 10px;border-left:3px solid var(--accent);background:#fafbfc;border-radius:0 8px 8px 0"><b>'+rid+' · '+escH(revName[rid])+'</b>';
-   if(rn)h+='<div style="margin:4px 0;white-space:pre-wrap;color:#374151">'+escH(rn)+'</div>';
-   ks.forEach(sid=>{h+='<div class="row"><span class="nm">'+escH(byId[sid]?byId[sid].name:sid)+'</span><span class="revs">'+escH(sm[sid])+'</span></div>';});h+='</div>';});
- if(!any)h+='<span class="mut">— aún no hay notas por revisión. Ve a "Por revisión", elige una SR y escribe. —</span>';h+='</div>';
+   if(rn)h+='<div style="margin:4px 0;white-space:pre-wrap;color:#374151">📝 '+escH(rn)+'</div>';
+   ks.forEach(sid=>{if(!byId[sid])return;const cn=canOf(sid);const inSR=rOf(sid).includes(rid);const chips=OUT.map(o=>{const on=rcTagged(rid,cn,o.c);return '<span class="oc '+o.c+(on?' on':'')+'" onclick="toggleRevOut(\''+rid+'\',\''+sid+'\',\''+o.c+'\')">'+(on?'✓ ':'')+o.c+'</span>';}).join('');
+     h+='<div class="row"><span class="nm">'+escH(byId[sid].name)+'</span>'+(inSR?'':' <span class="badge b-alias">no en '+rid+'</span>')+'<span>'+chips+'</span>'+(inSR?'<button class="xs red" onclick="removeAssoc(\''+sid+'\',\''+rid+'\')">✕ quitar de '+rid+'</button>':'')+'<span class="revs" style="flex-basis:100%">'+escH(sm[sid])+'</span></div>';});h+='</div>';});
+ if(!any)h+='<span class="mut">— aún no hay notas por estudio. Ve a "Por revisión", elige una SR y escríbelas. —</span>';h+='</div>';
  const lg=Object.keys(studyNotes).filter(k=>studyNotes[k]&&studyNotes[k].trim());
  if(lg.length){h+='<div class="card"><b>Notas por estudio (globales — versión anterior)</b><div class="hint">Vienen de una versión previa; ahora las notas son por estudio×revisión. Se conservan aquí para que no se pierdan.</div>';lg.forEach(cn=>{h+='<div class="row"><span class="nm">'+escH(canonName[cn]||cn)+'</span><span class="revs">'+escH(studyNotes[cn])+'</span></div>';});h+='</div>';}
  $('v-notes').innerHTML=h;$('bitacora').value=notes;}
