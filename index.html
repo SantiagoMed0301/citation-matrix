@@ -84,6 +84,8 @@ function setRevStudyNote(rid,sid,val){revStudyNotes[rid]=revStudyNotes[rid]||{};
 const LSKEY='citation_dedup_autosave_v1';let lsOK=true;
 // artículos agregados por el usuario + selección para fusión manual
 let addedStudies=[];let manualSel=new Set();
+// revisiones agregadas / renombradas / eliminadas por el usuario
+let addedReviews=[],reviewNameOverrides={},removedReviews=[];
 // renombres persistentes de estudios (base o agregados)
 let nameOverrides={};
 // marca de "posible duplicado sin fusionar" (fuzzy) + descartados por el usuario
@@ -162,6 +164,9 @@ function toggleDrill(id){const d=$('d-'+id);if(d)d.style.display=d.style.display
 // ---- rev : outcome tagging + removal ----
 function renderRev(){let h='<div class="bar"><select id="rsel" onchange="renderRev()"><option value="">— elige una revisión —</option>';reviews.forEach(r=>h+='<option value="'+r.rid+'">'+r.rid+' · '+esc(r.name)+' (N='+(r.n||'?')+')</option>');h+='</select>';if(removedLog.length)h+='<button class="xs" onclick="restoreLast()">↩ Deshacer última quitada</button>';h+='</div>';
  const sel=$('rsel')?$('rsel').value:'';
+ h+='<div class="card" style="border-color:#fde68a;background:#fffbeb"><b>🗂 Gestionar revisiones</b><div class="hint">Agrega una revisión nueva (una columna más en la matriz), o renombra/elimina la que esté seleccionada arriba. Tras agregarla, queda seleccionada para que le marques sus artículos.</div><div class="tools"><input class="namein" id="addRevName" placeholder="Autor Año (ej. Li 2021)" style="width:200px"><input class="namein" id="addRevCov" placeholder="#244" style="width:90px"><input class="namein" id="addRevN" placeholder="N estudios (opcional)" style="width:140px"><button class="green" onclick="addReview()">➕ Agregar revisión</button></div>';
+ if(sel)h+='<div class="tools" style="margin-top:6px;align-items:center"><span class="mut">Seleccionada: <b>'+sel+'</b> · '+esc(revName[sel])+'</span><button class="xs" onclick="renameReview(\''+sel+'\')">✎ Renombrar</button><button class="xs red" onclick="removeReview(\''+sel+'\')">🗑 Eliminar</button></div>';
+ h+='</div>';
  h+='<div class="card" style="border-color:#bbf7d0;background:#f0fdf4"><b>➕ Agregar artículo</b><div class="hint">Si a una SR le falta un estudio (ej. notaste que a R2 le falta uno), agrégalo aquí. Se crea como estudio nuevo incluido por la(s) revisión(es) que indiques. Si es el mismo que otro ya existente, luego únelos en Duplicados → Fusión manual.</div><div class="tools"><input class="namein" id="addName" placeholder="Autor Año (ej. Smith 2020)" style="width:240px"><input class="namein" id="addRevs" value="'+(sel||'')+'" placeholder="R2 (o R2,R5)" style="width:130px" title="Revisiones separadas por coma"><button class="green" onclick="addStudy()">Agregar</button></div>';
  if(addedStudies.length){h+='<div class="hint" style="margin-top:8px">Agregados por ti: '+addedStudies.map(s=>esc(s.name)+' ('+s.sid+', '+s.reviews.join('/')+') <button class="xs red" onclick="delStudy(\''+s.sid+'\')">✕</button>').join(' · ')+'</div>';}
  h+='</div>';
@@ -186,16 +191,48 @@ function expRem(){let csv='SID,Study,Removed from review\n';removedLog.forEach(x
 function tab(t){curTab=t;['dup','all','out','rev','notes','ov','exp'].forEach(x=>{$('v-'+x).style.display=x===t?'block':'none';document.querySelector('.tab[data-t='+x+']').classList.toggle('active',x===t);});if(t==='all')renderAll();if(t==='out')renderOut();if(t==='rev')renderRev();if(t==='notes')renderNotes();if(t==='ov')renderOverlap();if(t==='exp')renderExp();}
 // ===== memoria: auto-guardado (localStorage) =====
 function escH(t){return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function currentState(){return {v:6,canonical:canonical,canonName:canonName,clusterDone:clusterDone,studyReviews:studyReviews,removedLog:removedLog,revOut:revOut,notes:notes,studyNotes:studyNotes,addedStudies:addedStudies,revNotes:revNotes,revStudyNotes:revStudyNotes,nameOverrides:nameOverrides,simDismissed:simDismissed};}
-function applyState(st){canonical=st.canonical||canonical;canonName=st.canonName||canonName;clusterDone=st.clusterDone||{};studyReviews=st.studyReviews||studyReviews;removedLog=st.removedLog||[];nameOverrides=st.nameOverrides||{};addedStudies=(st.addedStudies||[]).map(s=>({sid:s.sid,name:s.name,reviews:[...(s.reviews||[])]}));syncAdded();if(st.revOut){revOut=st.revOut;}else if(st.outTags){revOut=migrateOutTags(st.outTags,st.canonical,st.studyReviews);}else{revOut={};}notes=st.notes||'';studyNotes=st.studyNotes||{};revNotes=st.revNotes||{};revStudyNotes=st.revStudyNotes||{};simDismissed=st.simDismissed||[];studies.forEach(s=>{if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});}
+function currentState(){return {v:7,canonical:canonical,canonName:canonName,clusterDone:clusterDone,studyReviews:studyReviews,removedLog:removedLog,revOut:revOut,notes:notes,studyNotes:studyNotes,addedStudies:addedStudies,revNotes:revNotes,revStudyNotes:revStudyNotes,nameOverrides:nameOverrides,simDismissed:simDismissed,addedReviews:addedReviews,reviewNameOverrides:reviewNameOverrides,removedReviews:removedReviews};}
+function applyState(st){canonical=st.canonical||canonical;canonName=st.canonName||canonName;clusterDone=st.clusterDone||{};studyReviews=st.studyReviews||studyReviews;removedLog=st.removedLog||[];nameOverrides=st.nameOverrides||{};addedStudies=(st.addedStudies||[]).map(s=>({sid:s.sid,name:s.name,reviews:[...(s.reviews||[])]}));syncAdded();addedReviews=(st.addedReviews||[]).map(r=>({rid:r.rid,name:r.name,n:r.n}));reviewNameOverrides=st.reviewNameOverrides||{};removedReviews=st.removedReviews||[];if(st.revOut){revOut=st.revOut;}else if(st.outTags){revOut=migrateOutTags(st.outTags,st.canonical,st.studyReviews);}else{revOut={};}notes=st.notes||'';studyNotes=st.studyNotes||{};revNotes=st.revNotes||{};revStudyNotes=st.revStudyNotes||{};simDismissed=st.simDismissed||[];studies.forEach(s=>{if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});syncReviews();}
 // ===== artículos agregados =====
 function syncAdded(){for(let i=studies.length-1;i>=0;i--){if(studies[i].sid[0]==='A'){delete byId[studies[i].sid];studies.splice(i,1);}}addedStudies.forEach(s=>{studies.push(s);byId[s.sid]=s;if(!(s.sid in canonical))canonical[s.sid]=s.sid;if(!(s.sid in canonName))canonName[s.sid]=s.name;if(!(s.sid in studyReviews))studyReviews[s.sid]=[...s.reviews];});Object.keys(nameOverrides).forEach(sid=>{if(byId[sid])byId[sid].name=nameOverrides[sid];});}
 function nextAId(){let m=0;addedStudies.forEach(s=>{const n=parseInt(s.sid.slice(1))||0;if(n>m)m=n;});return 'A'+(m+1);}
+// ===== revisiones: agregar / renombrar / eliminar =====
+function nextRId(){let m=0;reviews.forEach(r=>{const n=parseInt(r.rid.slice(1))||0;if(n>m)m=n;});addedReviews.forEach(r=>{const n=parseInt(r.rid.slice(1))||0;if(n>m)m=n;});return 'R'+(m+1);}
+function syncReviews(){
+ for(let i=reviews.length-1;i>=0;i--){if(reviews[i].__added)reviews.splice(i,1);}
+ addedReviews.forEach(r=>reviews.push({rid:r.rid,name:r.name,n:r.n,__added:true}));
+ const rm=new Set(removedReviews);
+ for(let i=reviews.length-1;i>=0;i--){if(rm.has(reviews[i].rid))reviews.splice(i,1);}
+ reviews.forEach(r=>{if(reviewNameOverrides[r.rid]!=null)r.name=reviewNameOverrides[r.rid];});
+ if(rm.size){Object.keys(studyReviews).forEach(sid=>{studyReviews[sid]=studyReviews[sid].filter(x=>!rm.has(x));});addedStudies.forEach(s=>{s.reviews=(s.reviews||[]).filter(x=>!rm.has(x));});removedLog=removedLog.filter(x=>!rm.has(x.rid));rm.forEach(rid=>{delete revOut[rid];delete revNotes[rid];delete revStudyNotes[rid];});}
+ Object.keys(revName).forEach(k=>delete revName[k]);reviews.forEach(r=>revName[r.rid]=r.name);}
+function cleanReviewRefs(rid){Object.keys(studyReviews).forEach(sid=>{studyReviews[sid]=studyReviews[sid].filter(x=>x!==rid);});addedStudies.forEach(s=>{s.reviews=(s.reviews||[]).filter(x=>x!==rid);});removedLog=removedLog.filter(x=>x.rid!==rid);delete revOut[rid];delete revNotes[rid];delete revStudyNotes[rid];}
+function addReview(){const nm=($('addRevName')?$('addRevName').value:'').trim();
+ if(!nm){alert('Escribe el autor y año de la revisión (ej. Li 2021).');return;}
+ const cov=($('addRevCov')?$('addRevCov').value:'').trim().replace(/^#/,'');
+ const nn=($('addRevN')?$('addRevN').value:'').trim();
+ const disp=cov?nm+' (#'+cov+')':nm;
+ if(reviews.some(r=>r.name.toLowerCase()===disp.toLowerCase())){if(!confirm('Ya existe una revisión con ese nombre. ¿Agregarla de todos modos?'))return;}
+ const rid=nextRId();addedReviews.push({rid:rid,name:disp,n:nn?(parseInt(nn)||nn):''});
+ syncReviews();stats();renderRev();if($('rsel'))$('rsel').value=rid;renderRev();autosave();
+ alert('✔ Revisión agregada: '+disp+' ('+rid+').\n\nAhora está seleccionada abajo: marca sus artículos con "Añadir un estudio EXISTENTE a '+rid+'" (si ya están en la matriz) o "Agregar artículo" (si es nuevo).');}
+function renameReview(rid){if(!rid){alert('Elige una revisión primero (en el desplegable).');return;}
+ const cur=revName[rid]||'';const nn=prompt('Nuevo nombre para '+rid+' (incluye el año y, si quieres, el (#covidence)):',cur);if(nn===null)return;const v=nn.trim();if(!v||v===cur)return;
+ reviewNameOverrides[rid]=v;const ad=addedReviews.find(r=>r.rid===rid);if(ad)ad.name=v;
+ syncReviews();stats();renderRev();if($('rsel'))$('rsel').value=rid;renderRev();autosave();}
+function removeReview(rid){if(!rid){alert('Elige una revisión primero (en el desplegable).');return;}
+ const isAdded=addedReviews.some(r=>r.rid===rid);
+ if(!confirm('¿Eliminar la revisión '+rid+' · '+(revName[rid]||'')+' de la matriz?\n\nSe quitará de todos los estudios y se borrarán sus etiquetas de outcome y notas.'+(isAdded?'':'\n(Es una revisión base; para recuperarla tendrías que recargar una sesión previa o borrar la memoria.)')))return;
+ cleanReviewRefs(rid);
+ if(isAdded){addedReviews=addedReviews.filter(r=>r.rid!==rid);}else if(!removedReviews.includes(rid)){removedReviews.push(rid);}
+ delete reviewNameOverrides[rid];
+ syncReviews();stats();if($('rsel'))$('rsel').value='';renderRev();autosave();
+ alert('✔ Revisión '+rid+' eliminada.');}
 function addStudy(){const nm=($('addName')?$('addName').value:'').trim();const rv=($('addRevs')?$('addRevs').value:'').trim();
  if(!nm){alert('Escribe el autor y año del artículo (ej. Smith 2020).');return;}
  const valid=new Set(reviews.map(r=>r.rid));const revs=rv.split(',').map(x=>x.trim().toUpperCase()).filter(x=>x);
  if(!revs.length){alert('Indica al menos una revisión (ej. R2).');return;}
- const bad=revs.filter(x=>!valid.has(x));if(bad.length){alert('Revisión(es) no válida(s): '+bad.join(', ')+'. Usa R1..R33.');return;}
+ const bad=revs.filter(x=>!valid.has(x));if(bad.length){alert('Revisión(es) no válida(s): '+bad.join(', ')+'.\nUsa un ID existente (R1, R2, …). Si es una revisión nueva, créala primero con "Agregar revisión".');return;}
  const sims=similarTo(nm,null);if(sims.length){if(!confirm('⚠️ Ya existe algo parecido:\n'+sims.map(x=>'• '+x.name+' ('+Math.round(x.r*100)+'%)').join('\n')+'\n\n¿De todos modos crear "'+nm+'" como NUEVO?\n(Si es el mismo, cancela y usa "Añadir estudio existente".)'))return;}
  const sid=nextAId();const s={sid:sid,name:nm,reviews:[...revs]};addedStudies.push(s);syncAdded();canonical[sid]=sid;canonName[sid]=nm;studyReviews[sid]=[...revs];
  renderRev();stats();alert('✔ Agregado: '+nm+' ('+sid+') en '+revs.join(', ')+'.\nSi es el mismo que otro estudio ya existente, ve a Duplicados → Fusión manual para unirlos.');}
@@ -363,6 +400,11 @@ function mergeSession(file){if(!file)return;const rd=new FileReader();rd.onload=
   let incRev=st.revOut;if(!incRev&&st.outTags)incRev=migrateOutTags(st.outTags,st.canonical,st.studyReviews);
   if(incRev){Object.keys(incRev).forEach(rid=>{revOut[rid]=revOut[rid]||{};Object.keys(incRev[rid]).forEach(cn=>{const tgt=canonical[cn]||cn;revOut[rid][tgt]=revOut[rid][tgt]||{};['VO2','FC','QoL'].forEach(k=>{if(incRev[rid][cn][k]&&!revOut[rid][tgt][k]){revOut[rid][tgt][k]=true;addTags++;}});});});}
   // 5) clusters resueltos: OR
+  // revisiones agregadas / renombradas / eliminadas (unión)
+  if(st.addedReviews){const haveRid=new Set(reviews.map(r=>r.rid).concat(addedReviews.map(r=>r.rid)));const haveName=new Set(addedReviews.map(r=>(r.name||'').toLowerCase()));st.addedReviews.forEach(r=>{const nm=(r.name||'').toLowerCase();if(haveRid.has(r.rid)||haveName.has(nm))return;addedReviews.push({rid:r.rid,name:r.name,n:r.n});haveRid.add(r.rid);haveName.add(nm);});}
+  if(st.removedReviews)st.removedReviews.forEach(rid=>{if(!removedReviews.includes(rid))removedReviews.push(rid);});
+  if(st.reviewNameOverrides)Object.keys(st.reviewNameOverrides).forEach(rid=>{if(reviewNameOverrides[rid]==null)reviewNameOverrides[rid]=st.reviewNameOverrides[rid];});
+  syncReviews();
   if(st.clusterDone){Object.keys(st.clusterDone).forEach(k=>{if(st.clusterDone[k])clusterDone[k]=true;});}
   // notas: bitácora (concatena si difiere) + notas por estudio (unión)
   if(st.notes){if(!notes)notes=st.notes;else if(notes.indexOf(st.notes)===-1)notes=notes+'\n\n--- (combinado) ---\n'+st.notes;}
@@ -373,5 +415,5 @@ function mergeSession(file){if(!file)return;const rd=new FileReader();rd.onload=
   renderDup();stats();tab(curTab);
   alert('Sesiones combinadas ✓\n\n+'+addTags+' etiquetas de outcome\n+'+addMerge+' estudios fusionados (nuevos)\n+'+addNew+' artículos agregados nuevos\n+'+addRem+' asociaciones quitadas\n\nLas fusiones de ambas se unieron automáticamente (union-find); si las dos usaron un canónico distinto para el mismo estudio, se conservó un solo grupo.');
  }catch(err){alert('Archivo inválido: '+err);}};rd.readAsText(file);}
-restoreAuto();renderDup();stats();
+restoreAuto();syncReviews();renderDup();stats();
 </script></body></html>
